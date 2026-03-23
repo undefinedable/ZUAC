@@ -151,8 +151,8 @@ If no argument is provided, it attempts to execute using the raw command line.
 - https://github.com/blue0x1/uac-bypass  
 
 Additional context:
-- SilentCleanup task executes with elevated privileges while referencing `%windir%`, which can be user-controlled via registry. :contentReference[oaicite:2]{index=2}  
-- Detection rules commonly monitor modification of `HKCU\Environment\windir` due to its association with privilege escalation techniques. :contentReference[oaicite:3]{index=3}  
+- SilentCleanup task executes with elevated privileges while referencing `%windir%`, which can be user-controlled via registry.
+- Detection rules commonly monitor modification of `HKCU\Environment\windir` due to its association with privilege escalation techniques.
 
 ---
 
