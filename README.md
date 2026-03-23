@@ -1,84 +1,105 @@
 # ZUAC (Zeppelin UAC)
 
+Pure C implementation of a UAC bypass technique leveraging environment variable manipulation and the Windows Task Scheduler.
+
+Author: @undefinedable
+
+---
+
 ## Overview
 
-**ZUAC** is a pure C implementation targeting Windows environments, demonstrating a privilege escalation technique via the built-in **SilentCleanup** scheduled task.
+ZUAC implements a fileless User Account Control (UAC) bypass technique based on the abuse of the **SilentCleanup** scheduled task.
 
-The method leverages user-controlled environment variable manipulation to influence task execution context. Specifically, it hijacks the `WINDIR` environment variable within the current user registry hive, causing the task to execute an arbitrary payload with elevated privileges.
+The technique relies on the fact that certain scheduled tasks:
+- Are configured with **RunLevel = Highest (auto-elevated)**
+- Can be triggered by a standard user
+- Reference **environment variables** (e.g., `%windir%`) in their execution path
 
-This implementation avoids C++ abstractions and relies entirely on native Win32 and COM interfaces, using `COBJMACROS` for C-style interaction with the Task Scheduler API.
+By overriding user-controlled environment variables, execution flow can be redirected to an arbitrary payload, resulting in elevated execution without prompting the user.
 
-Maintained by **@undefinedable**.
+This behavior originates from design decisions in Task Scheduler and environment variable resolution, where user-controlled registry values may influence privileged execution paths. :contentReference[oaicite:0]{index=0}
 
 ---
 
 ## Technical Details
 
-### SilentCleanup Task Interaction
+### SilentCleanup Task Abuse
 
-The escalation mechanism targets the scheduled task:
+The target task:
 
 ```
 \Microsoft\Windows\DiskCleanup\SilentCleanup
 ```
 
-Execution is performed via COM interfaces:
+Key properties:
+- Runs with **highest privileges**
+- Callable by **standard users**
+- Executes:
 
-* `ITaskService`
-* `ITaskFolder`
-* `IRegisteredTask`
-* `IRunningTask`
-
-Using `COBJMACROS`, the implementation interacts with COM objects in pure C style:
-
-```c
-ITaskService_Connect(...)
-ITaskFolder_GetTask(...)
-IRegisteredTask_RunEx(...)
+```
+%windir%\system32\cleanmgr.exe
 ```
 
----
+Since `%windir%` is resolved from environment variables, it becomes a controllable primitive.
 
 ### Environment Variable Hijacking
 
-The core primitive relies on modifying:
+ZUAC modifies:
 
 ```
-HKCU\Environment\WINDIR
+HKEY_CURRENT_USER\Environment\WINDIR
 ```
 
-Steps:
+This allows a non-privileged user to influence how the scheduled task resolves its execution path.
 
-1. Set a user-controlled `WINDIR` value pointing to the payload
-2. Broadcast environment changes system-wide via `WM_SETTINGCHANGE`
-3. Trigger the SilentCleanup task
-4. The task resolves `%WINDIR%` from the user context, executing the injected payload
+When the task executes:
+- `%windir%` is replaced with attacker-controlled data
+- The system executes a substituted binary or command chain
 
----
+This works because privileged processes may inherit or resolve environment variables influenced by user context. :contentReference[oaicite:1]{index=1}
 
-### OS Version Handling
+### COM Interaction (Task Scheduler)
 
-The implementation queries the OS version via:
+The implementation uses:
+- `ITaskService`
+- `ITaskFolder`
+- `IRegisteredTask`
 
-```c
-RtlGetVersion (ntdll.dll)
+All invoked through **COBJMACROS**, enabling COM interaction in pure C style without C++ abstractions.
+
+Execution flow:
+1. Initialize COM (`CoInitializeEx`)
+2. Connect to Task Scheduler
+3. Retrieve SilentCleanup task
+4. Execute via `IRegisteredTask::RunEx`
+
+### Environment Refresh
+
+After modifying the registry, the code broadcasts:
+
+```
+WM_SETTINGCHANGE
 ```
 
-* Applies conditional quoting logic for Windows 10 builds ≥ 19044
-* Ensures compatibility with argument parsing behavior changes
+This ensures the updated environment variables are recognized system-wide without requiring a logoff.
 
----
+### Execution Flow Summary
 
-### Registry Cleanup
+1. Build payload path
+2. Set `WINDIR` in HKCU
+3. Broadcast environment update
+4. Trigger SilentCleanup task via COM
+5. Elevated execution occurs
+6. Sleep briefly
+7. Remove registry modification (cleanup)
 
-After task execution:
+This results in a **fileless elevation primitive**, requiring only transient registry modification.
 
-* The `WINDIR` value is removed from:
+### OS Behavior Notes
 
-  ```
-  HKCU\Environment
-  ```
-* Environment is restored to its original state
+- Behavior depends on Windows build/version
+- Some builds patched or hardened this vector
+- Quote handling differences are addressed dynamically in code
 
 ---
 
@@ -91,48 +112,55 @@ cl /nologo /W4 /DUNICODE /D_UNICODE main.c
 ```
 
 Required libraries:
-
-* `Advapi32.lib`
-* `User32.lib`
-* `Ole32.lib`
-* `OleAut32.lib`
-* `Taskschd.lib`
+- Advapi32.lib
+- User32.lib
+- Ole32.lib
+- OleAut32.lib
+- Taskschd.lib
 
 ---
 
 ## Usage
 
+ZUAC determines the payload as follows:
+
+1. `argv[1]` (highest priority)
+2. `lpCmdLine` fallback
+
+Example:
+
 ```
-ZUAC.exe [payload_path]
+zuac.exe C:\Path\to\payload.exe
 ```
 
-* If `argv[1]` is provided, it is used as the payload path
-* Otherwise, falls back to `lpCmdLine`
-
-Execution flow:
-
-1. Set `WINDIR` environment variable (user scope)
-2. Broadcast environment update
-3. Invoke SilentCleanup scheduled task
-4. Execute payload under elevated context
-5. Remove modified registry value
+If no argument is provided, it attempts to execute using the raw command line.
 
 ---
 
-## Notes
+## Warning
 
-> [!IMPORTANT]
-> The `WM_SETTINGCHANGE` broadcast is required to propagate the modified environment variable before triggering the scheduled task.
+> [!WARNING]  
+> This project demonstrates a UAC bypass technique that manipulates user-controlled environment variables and triggers an auto-elevated scheduled task. Execution of this code may be flagged, blocked, or logged by modern security solutions such as EDR, antivirus, or Windows Defender. Behavior may vary across Windows versions due to patches and mitigations.
 
-> [!WARNING]
-> Interaction with scheduled tasks and environment manipulation may be monitored or blocked by endpoint protection systems.
+---
+
+## References
+
+- https://www.tiraniddo.dev/2017/05/exploiting-environment-variables-in.html  
+- https://github.com/hfiref0x/UACME  
+- https://github.com/blue0x1/uac-bypass  
+
+Additional context:
+- SilentCleanup task executes with elevated privileges while referencing `%windir%`, which can be user-controlled via registry. :contentReference[oaicite:2]{index=2}  
+- Detection rules commonly monitor modification of `HKCU\Environment\windir` due to its association with privilege escalation techniques. :contentReference[oaicite:3]{index=3}  
 
 ---
 
 ## Legal Disclaimer
 
-> [!WARNING]
-> This project is intended strictly for educational purposes, security research, and authorized testing. Unauthorized use against systems without explicit permission may violate applicable laws and regulations.
+This project is intended strictly for:
+- Security research
+- Educational purposes
+- Defensive development and testing
 
-> [!CAUTION]
-> Execution in non-isolated environments may trigger defensive controls or result in unintended system behavior.
+Unauthorized use of this code against systems without explicit permission may violate applicable laws and regulations. The author assumes no responsibility for misuse or damage caused by this software.
