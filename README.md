@@ -17,7 +17,7 @@ The technique relies on the fact that certain scheduled tasks:
 
 By overriding user-controlled environment variables, execution flow can be redirected to an arbitrary payload, resulting in elevated execution without prompting the user.
 
-This behavior originates from design decisions in Task Scheduler and environment variable resolution, where user-controlled registry values may influence privileged execution paths. :contentReference[oaicite:0]{index=0}
+This behavior originates from design decisions in Task Scheduler and environment variable resolution, where user-controlled registry values may influence privileged execution paths. 
 
 ---
 
@@ -56,7 +56,7 @@ When the task executes:
 - `%windir%` is replaced with attacker-controlled data
 - The system executes a substituted binary or command chain
 
-This works because privileged processes may inherit or resolve environment variables influenced by user context. :contentReference[oaicite:1]{index=1}
+This works because privileged processes may inherit or resolve environment variables influenced by user context. 
 
 ### COM Interaction (Task Scheduler)
 
